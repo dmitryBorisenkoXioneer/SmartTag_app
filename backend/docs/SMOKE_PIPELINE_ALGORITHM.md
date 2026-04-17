@@ -1,6 +1,6 @@
 # Алгоритм локального smoke-теста (Docker → MQTT → окна → БД → IF)
 
-Документ описывает **последовательность действий и логику**, которые были выполнены для проверки цепочки «как у реального ESP32», без прошивки. Контракт полей и чисел: [SmartTag_fw/docs/09-critical-decisions-v0.md](../../../SmartTag_fw/docs/09-critical-decisions-v0.md). Номинальный период MQTT при полной пачке 128 и ODR 3332: **§1.1** того же файла. Оглавление всего плана: [SmartTag_fw/docs/plan.md](../../../SmartTag_fw/docs/plan.md).
+Документ описывает **последовательность действий и логику**, которые были выполнены для проверки цепочки «как у реального ESP32», без прошивки. Контракт полей и чисел: [SmartTag_fw/docs/critical-decisions-v0.md](../../../SmartTag_fw/docs/critical-decisions-v0.md). Номинальный период MQTT при полной пачке 128 и ODR 3332: **§1.1** того же файла. Оглавление всего плана: [SmartTag_fw/docs/plan.md](../../../SmartTag_fw/docs/plan.md).
 
 ---
 
@@ -73,6 +73,8 @@ train_if.py  <-------- SELECT rms_mag (assembled only) -------------+
 | `odr_hz` | Дублирование ODR для проверки |
 | `scenario_id` | `stepper_5rps_assembled` или `stepper_5rps_no_bearing` |
 | `samples` | До **128** объектов `{x,y,z}` в **mg** |
+
+Для **Isolation Forest** ingest собирает окна по **256** сэмплам; **128** сэмплов в сообщении — это **ровно половина окна** (`MQTT_BATCH_SAMPLES_IF_OPTIMAL` в `smarttag_ml/constants.py`): два сообщения подряд с непрерывным `seq` и согласованным `ts_last_ms` дают одно окно с минимальной частотой MQTT. Симулятор наращивает время конца пачки в **мкс** шагом `128 * dt_us`, чтобы сетка не дрейфовала.
 
 Симулятор генерирует **синтетический** вектор ускорений: для **assembled** — шум **5** mg по осям; для **no_bearing** — **40** mg; на ось **Z** добавляется смещение **~1000 mg** (≈1 g), затем на приёме снимается **DC по окну**, поэтому в RMS остаётся в основном шумовая часть.
 
@@ -169,4 +171,4 @@ train_if.py  <-------- SELECT rms_mag (assembled only) -------------+
 
 - Это **синтетика**; на реальном узле разница может быть меньше или нестабильной.
 - Один признак **RMS** не гарантирует разделимость всех поломок.
-- План и риски «модель в контуре» vs «физика стенда» см. план Cursor **backend_ml_smoke_test** и [SmartTag_fw/docs/11-milestones-and-verification.md](../../../SmartTag_fw/docs/11-milestones-and-verification.md).
+- План и риски «модель в контуре» vs «физика стенда» см. план Cursor **backend_ml_smoke_test** и [SmartTag_fw/docs/milestones-and-verification.md](../../../SmartTag_fw/docs/milestones-and-verification.md).

@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -28,7 +29,12 @@ ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
 sys.path.insert(0, str(ROOT))
 
-from smarttag_ml.constants import SCENARIO_ASSEMBLED, SCENARIO_NO_BEARING  # noqa: E402
+from smarttag_ml.constants import (  # noqa: E402
+    DT_US_DEFAULT,
+    MQTT_BATCH_SAMPLES_IF_OPTIMAL,
+    SCENARIO_ASSEMBLED,
+    SCENARIO_NO_BEARING,
+)
 from smarttag_ml.synthetic_payload import build_payload  # noqa: E402
 
 log = logging.getLogger("demo_server")
@@ -81,6 +87,8 @@ def _mqtt_burst(device_id: str, scenario_id: str, duration_sec: float, publish_h
     rng = np.random.default_rng(42)
 
     last_seq = _demo_last_seq.get(device_id, 0)
+    batch_span_us = MQTT_BATCH_SAMPLES_IF_OPTIMAL * DT_US_DEFAULT
+    t_end_us = int(time.time() * 1_000_000)
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"demo_ui_{device_id}")
     client.connect(mqtt_host, mqtt_port, keepalive=60)
     client.loop_start()
@@ -90,7 +98,9 @@ def _mqtt_burst(device_id: str, scenario_id: str, duration_sec: float, publish_h
         deadline = time_mod.monotonic() + duration_sec
         while time_mod.monotonic() < deadline:
             last_seq += 1
-            payload = build_payload(last_seq, scenario_id, rng)
+            t_end_us += batch_span_us
+            ts_last_ms = t_end_us // 1000
+            payload = build_payload(last_seq, scenario_id, rng, ts_last_ms=ts_last_ms)
             client.publish(topic, json.dumps(payload), qos=1)
             time_mod.sleep(period)
     finally:

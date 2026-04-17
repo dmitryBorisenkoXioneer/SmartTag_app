@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Train IsolationForest on rms_mag rows (assembled only), save joblib.
-Matches SmartTag_fw/docs/09-critical-decisions-v0.md whitelist.
+Matches SmartTag_fw/docs/critical-decisions-v0.md whitelist.
 """
 
 from __future__ import annotations

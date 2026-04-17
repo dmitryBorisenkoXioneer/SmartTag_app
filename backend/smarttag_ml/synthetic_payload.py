@@ -7,12 +7,12 @@ from typing import Any
 
 import numpy as np
 
-from smarttag_ml.constants import DT_US_DEFAULT, ODR_HZ_DEFAULT, SCENARIO_ASSEMBLED
+from smarttag_ml.constants import DT_US_DEFAULT, MQTT_BATCH_SAMPLES_IF_OPTIMAL, ODR_HZ_DEFAULT, SCENARIO_ASSEMBLED
 
 
 def build_payload(seq: int, scenario_id: str, rng: np.random.Generator, ts_last_ms: int | None = None) -> dict[str, Any]:
-    """One JSON-serializable batch: 128 samples, mg, ~1 g bias on Z (removed by DC per window in ingest)."""
-    n = 128
+    """One JSON-serializable batch: MQTT_BATCH_SAMPLES_IF_OPTIMAL samples, mg, ~1 g bias on Z (DC per window in ingest)."""
+    n = MQTT_BATCH_SAMPLES_IF_OPTIMAL
     if scenario_id == SCENARIO_ASSEMBLED:
         noise = 5.0
     else:

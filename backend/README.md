@@ -1,6 +1,6 @@
 # SmartTag back-end (v0 smoke)
 
-Один **ingest** на MQTT → окна **256** → **RMS** → TimescaleDB → опционально **IsolationForest** (`train_if.py`). Источник MQTT: **`scripts/simulate_mcu.py`**, позже ESP32 или `replay_csv.py` — контракт [SmartTag_fw/docs/09-critical-decisions-v0.md](../../SmartTag_fw/docs/09-critical-decisions-v0.md). Оглавление плана: [SmartTag_fw/docs/plan.md](../../SmartTag_fw/docs/plan.md).
+Один **ingest** на MQTT → окна **256** → **RMS** → TimescaleDB → опционально **IsolationForest** (`train_if.py`). Источник MQTT: **`scripts/simulate_mcu.py`**, позже ESP32 или `replay_csv.py` — контракт [SmartTag_fw/docs/critical-decisions-v0.md](../../SmartTag_fw/docs/critical-decisions-v0.md). Оглавление плана: [SmartTag_fw/docs/plan.md](../../SmartTag_fw/docs/plan.md).
 
 **Полный разбор алгоритма (шаги, SQL, IF, багфикс симулятора):** [docs/SMOKE_PIPELINE_ALGORITHM.md](./docs/SMOKE_PIPELINE_ALGORITHM.md).
 
@@ -10,8 +10,9 @@
 |-----------|------|
 | `smarttag_ml/` | Константы и формула RMS — общие для ingest / train / тестов |
 | `smarttag_ml/synthetic_payload.py` | Тот же JSON-пачки, что у MCU-симулятора (используют `simulate_mcu` и demo UI) |
+| `smarttag_ml/binary_telemetry_v1.py` | Декод бинарных кадров v1 → тот же вид, что JSON для ingest ([telemetry-binary-v1.md](../../SmartTag_fw/docs/telemetry-binary-v1.md)) |
 | `smarttag_ml/deviation.py` | Индекс отклонения 0–100% по RMS + опция «пол IF» (дублирует логику SQL в `demo_server`) |
-| `scripts/ingest_service.py` | Единственная точка: MQTT → буфер → окна → БД → `predict` |
+| `scripts/ingest_service.py` | MQTT `…/telemetry/json` и `…/telemetry/bin` → буфер → окна → БД → `predict` |
 | `scripts/simulate_mcu.py` | Только publisher (как ESP32) |
 | `scripts/train_if.py` | Офлайн fit + `joblib` |
 | `demo_server.py` | Мини-API + статика: публикация пачек в MQTT, сводка по `feature_windows`, опционально вызов `train_if.py` |
@@ -95,4 +96,4 @@ uvicorn demo_server:app --host 127.0.0.1 --port 8787
 
 ## Критерий «можно ехать дальше»
 
-См. чеклист в [SmartTag_fw/docs/11-milestones-and-verification.md](../../SmartTag_fw/docs/11-milestones-and-verification.md) (блоки C/E) и цели плана в Cursor `backend_ml_smoke_test`.
+См. чеклист в [SmartTag_fw/docs/milestones-and-verification.md](../../SmartTag_fw/docs/milestones-and-verification.md) (блоки C/E) и цели плана в Cursor `backend_ml_smoke_test`.

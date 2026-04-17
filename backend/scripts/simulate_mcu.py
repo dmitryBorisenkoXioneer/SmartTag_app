@@ -20,7 +20,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from smarttag_ml.constants import SCENARIO_ASSEMBLED, SCENARIO_NO_BEARING  # noqa: E402
+from smarttag_ml.constants import (  # noqa: E402
+    DT_US_DEFAULT,
+    MQTT_BATCH_SAMPLES_IF_OPTIMAL,
+    SCENARIO_ASSEMBLED,
+    SCENARIO_NO_BEARING,
+)
 from smarttag_ml.synthetic_payload import build_payload  # noqa: E402
 
 
@@ -48,11 +53,16 @@ def main() -> None:
 
     rng = np.random.default_rng(42)
     seq = 0
+    # Monotonic batch end times on the ODR grid (train=serve; avoids ms rounding drift).
+    batch_span_us = MQTT_BATCH_SAMPLES_IF_OPTIMAL * DT_US_DEFAULT
+    t_end_us = int(time.time() * 1_000_000)
     print(f"publishing to {topic} scenario={scenario_id} ~{args.hz} Hz", flush=True)
     try:
         while True:
             seq += 1
-            payload = build_payload(seq, scenario_id, rng)
+            t_end_us += batch_span_us
+            ts_last_ms = t_end_us // 1000
+            payload = build_payload(seq, scenario_id, rng, ts_last_ms=ts_last_ms)
             payload["fw_version"] = "simulate_mcu-0.1"
             client.publish(topic, json.dumps(payload), qos=1)
             time.sleep(period)

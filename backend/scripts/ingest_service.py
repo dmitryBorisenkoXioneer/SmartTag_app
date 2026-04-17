@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from smarttag_ml.binary_telemetry_v1 import decode_binary_telemetry_v1  # noqa: E402
 from smarttag_ml.constants import WINDOW_SAMPLES  # noqa: E402
 from smarttag_ml.windowing import rms_mag_from_xyz  # noqa: E402
 
@@ -151,11 +152,18 @@ def on_message(client, userdata, msg):  # noqa: ARG001
     if len(parts) < 5 or parts[0] != "smarttag" or parts[1] != "v1":
         return
     device_id = parts[2]
-    try:
-        body = json.loads(msg.payload.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as e:
-        log.error("bad json: %s", e)
-        return
+    is_binary = len(parts) >= 5 and parts[3] == "telemetry" and parts[4] == "bin"
+    if is_binary:
+        body = decode_binary_telemetry_v1(msg.payload)
+        if body is None:
+            log.error("bad binary telemetry (topic=%s len=%d)", msg.topic, len(msg.payload))
+            return
+    else:
+        try:
+            body = json.loads(msg.payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as e:
+            log.error("bad json: %s", e)
+            return
 
     seq = int(body["seq"])
     dt_us = int(body["dt_us"])
@@ -203,7 +211,8 @@ def main() -> None:
     client.on_message = on_message
     client.connect(mqtt_host, mqtt_port, keepalive=60)
     client.subscribe("smarttag/v1/+/telemetry/json", qos=1)
-    log.info("subscribed smarttag/v1/+/telemetry/json, PG ok")
+    client.subscribe("smarttag/v1/+/telemetry/bin", qos=1)
+    log.info("subscribed smarttag/v1/+/telemetry/json + .../telemetry/bin, PG ok")
     client.loop_forever()
 
 
