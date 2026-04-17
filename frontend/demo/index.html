@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SmartTag — демо вибрации</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="head">
+        <h1>SmartTag demo</h1>
+        <p class="sub">
+          Кнопки шлют синтетику в MQTT как <code>simulate_mcu</code>. Нужны Docker, <strong>ingest_service</strong> и для IF —
+          обученный <code>MODEL_PATH</code> на ingest. <strong>Отклонение %</strong> — шкала по RMS (см. <code>RMS_DEV_*</code> в
+          <code>.env</code>) плюс нижняя планка при выбросе IF.
+        </p>
+      </header>
+
+      <section class="row">
+        <button type="button" id="btn-assembled" class="btn btn-ok">С подшипником (норма)</button>
+        <button type="button" id="btn-no-bearing" class="btn btn-warn">Без подшипника</button>
+        <button type="button" id="btn-train" class="btn btn-ghost">Обучить IF</button>
+      </section>
+
+      <section class="panel" id="status-line">Проверка API…</section>
+
+      <section class="panel results" id="results" hidden>
+        <h2>Результат прогона</h2>
+        <div class="deviation-meter" id="deviation-meter" hidden>
+          <div class="deviation-meter__head">
+            <span>Отклонение (среднее), %</span>
+            <strong id="deviation-meter-value">—</strong>
+          </div>
+          <div class="deviation-meter__track" aria-hidden="true">
+            <div class="deviation-meter__mask" id="deviation-meter-mask"></div>
+            <div class="deviation-meter__thumb" id="deviation-meter-thumb"></div>
+          </div>
+          <div class="deviation-meter__labels" aria-hidden="true">
+            <span>0%</span>
+            <span>50%</span>
+            <span>100%</span>
+          </div>
+        </div>
+        <dl class="grid">
+          <dt>Сценарий</dt>
+          <dd id="r-scenario">—</dd>
+          <dt>Окон в БД (за прогон)</dt>
+          <dd id="r-n">—</dd>
+          <dt>Отклонение (среднее), %</dt>
+          <dd id="r-dev-avg" class="pct">—</dd>
+          <dt>Отклонение (макс), %</dt>
+          <dd id="r-dev-max" class="pct">—</dd>
+          <dt>Средний RMS, mg</dt>
+          <dd id="r-rms">—</dd>
+          <dt>Средний score IF</dt>
+          <dd id="r-score">—</dd>
+          <dt>Окон IF = выброс</dt>
+          <dd id="r-out">—</dd>
+          <dt>Макс RMS, mg</dt>
+          <dd id="r-max">—</dd>
+        </dl>
+        <p class="note" id="r-hint"></p>
+      </section>
+
+      <section class="panel log" id="log" hidden>
+        <h2>Сырой ответ</h2>
+        <pre id="raw"></pre>
+      </section>
+    </main>
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>
