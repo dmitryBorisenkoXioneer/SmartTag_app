@@ -1,6 +1,6 @@
 # SmartTag back-end (v0 smoke)
 
-Один **ingest** на MQTT → окна **256** → **RMS** → TimescaleDB → опционально **IsolationForest** (`train_if.py`). Источник MQTT: **`scripts/simulate_mcu.py`**, позже ESP32 или `replay_csv.py` — контракт [SmartTag_fw/docs/09-critical-decisions-v0.md](../../SmartTag_fw/docs/09-critical-decisions-v0.md).
+Один **ingest** на MQTT → окна **256** → **RMS** → TimescaleDB → опционально **IsolationForest** (`train_if.py`). Источник MQTT: **`scripts/simulate_mcu.py`**, позже ESP32 или `replay_csv.py` — контракт [SmartTag_fw/docs/09-critical-decisions-v0.md](../../SmartTag_fw/docs/09-critical-decisions-v0.md). Оглавление плана: [SmartTag_fw/docs/plan.md](../../SmartTag_fw/docs/plan.md).
 
 **Полный разбор алгоритма (шаги, SQL, IF, багфикс симулятора):** [docs/SMOKE_PIPELINE_ALGORITHM.md](./docs/SMOKE_PIPELINE_ALGORITHM.md).
 
