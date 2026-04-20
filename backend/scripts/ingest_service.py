@@ -13,6 +13,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import joblib
 import numpy as np
@@ -44,17 +45,48 @@ def pg_conninfo() -> str:
     )
 
 
-def _batch_sample_times(ts_last_ms: int, dt_us: int, n: int) -> list[float]:
-    """Wall time (ms) of each sample in batch, first -> last within batch."""
-    dt_ms = dt_us / 1000.0
-    t0 = ts_last_ms - (n - 1) * dt_ms
-    return [t0 + i * dt_ms for i in range(n)]
+@dataclass
+class ModelRuntime:
+    model_path: Path | None
+    check_interval_s: float = 1.0
+    model: Any = None
+    last_mtime_ns: int | None = None
+    last_check_monotonic: float = 0.0
+
+    def refresh(self) -> Any:
+        import time
+
+        now = time.monotonic()
+        if now - self.last_check_monotonic < self.check_interval_s:
+            return self.model
+        self.last_check_monotonic = now
+
+        if self.model_path is None:
+            self.model = None
+            self.last_mtime_ns = None
+            return None
+
+        if not self.model_path.is_file():
+            if self.model is not None:
+                log.info("model file missing -> unloading IF model")
+            self.model = None
+            self.last_mtime_ns = None
+            return None
+
+        mtime_ns = self.model_path.stat().st_mtime_ns
+        if self.last_mtime_ns == mtime_ns and self.model is not None:
+            return self.model
+
+        self.model = joblib.load(self.model_path)
+        self.last_mtime_ns = mtime_ns
+        log.info("loaded model from %s", self.model_path)
+        return self.model
 
 
 @dataclass
 class DeviceBuffer:
-    # each entry: x, y, z, t_ms (float, wall ms)
-    samples: list[tuple[float, float, float, float]] = field(default_factory=list)
+    # each entry: x, y, z
+    samples: list[tuple[float, float, float]] = field(default_factory=list)
     last_seq: int | None = None
     last_scenario: str = ""
     last_dt_us: int = 300
@@ -68,12 +100,11 @@ class DeviceBuffer:
         device_id: str,
         seq: int,
         dt_us: int,
-        ts_last_ms: int,
         scenario_id: str,
         batch: list[dict],
         conn: psycopg.Connection,
         pipeline_version: str,
-        model,
+        model_runtime: ModelRuntime,
         rms_thresh: float,
     ) -> None:
         if self.last_seq is not None and seq != self.last_seq + 1:
@@ -82,18 +113,17 @@ class DeviceBuffer:
         self.last_dt_us = dt_us
         self.last_scenario = scenario_id
 
-        times = _batch_sample_times(ts_last_ms, dt_us, len(batch))
-        for s, t_ms in zip(batch, times, strict=True):
-            self.samples.append((float(s["x"]), float(s["y"]), float(s["z"]), t_ms))
+        for s in batch:
+            self.samples.append((float(s["x"]), float(s["y"]), float(s["z"])))
 
         while len(self.samples) >= WINDOW_SAMPLES:
             chunk = self.samples[:WINDOW_SAMPLES]
             self.samples = self.samples[WINDOW_SAMPLES:]
             arr = np.array([[c[0], c[1], c[2]] for c in chunk], dtype=np.float64)
             rms = rms_mag_from_xyz(arr)
-            ws_ms = int(round(chunk[0][3]))
-            ws_dt = datetime.fromtimestamp(ws_ms / 1000.0, tz=timezone.utc)
+            ws_dt = datetime.now(timezone.utc)
 
+            model = model_runtime.refresh()
             if_outlier = None
             anomaly_score = None
             if model is not None:
@@ -147,7 +177,7 @@ buffers: dict[str, DeviceBuffer] = {}
 
 
 def on_message(client, userdata, msg):  # noqa: ARG001
-    conn, model, pipeline_version, rms_thresh = userdata
+    conn, model_runtime, pipeline_version, rms_thresh = userdata
     parts = msg.topic.split("/")
     if len(parts) < 5 or parts[0] != "smarttag" or parts[1] != "v1":
         return
@@ -167,7 +197,6 @@ def on_message(client, userdata, msg):  # noqa: ARG001
 
     seq = int(body["seq"])
     dt_us = int(body["dt_us"])
-    ts_last_ms = int(body["ts_last_ms"])
     scenario_id = str(body["scenario_id"])
     batch = body["samples"]
     if not isinstance(batch, list) or not batch:
@@ -180,12 +209,11 @@ def on_message(client, userdata, msg):  # noqa: ARG001
         device_id,
         seq,
         dt_us,
-        ts_last_ms,
         scenario_id,
         batch,
         conn,
         pipeline_version,
-        model,
+        model_runtime,
         rms_thresh,
     )
 
@@ -195,16 +223,18 @@ def main() -> None:
     mqtt_port = int(os.environ.get("MQTT_PORT", "1883"))
     pipeline_version = os.environ.get("PIPELINE_VERSION", "v0")
     rms_thresh = float(os.environ.get("RMS_THRESH", "25"))
-    model_path = os.environ.get("MODEL_PATH", "").strip()
-    model = None
-    if model_path and Path(model_path).is_file():
-        model = joblib.load(model_path)
-        log.info("loaded model from %s", model_path)
+    model_path_raw = os.environ.get("MODEL_PATH", "").strip()
+    model_path = Path(model_path_raw) if model_path_raw else None
+    model_runtime = ModelRuntime(model_path=model_path)
+    if model_path is None:
+        log.info("MODEL_PATH not set — writing rows with if_outlier=NULL")
     else:
-        log.info("MODEL_PATH not set or missing — writing rows with if_outlier=NULL")
+        model_runtime.refresh()
+        if model_runtime.model is None:
+            log.info("MODEL_PATH missing/untrained — writing rows with if_outlier=NULL")
 
     conn = psycopg.connect(pg_conninfo())
-    userdata = (conn, model, pipeline_version, rms_thresh)
+    userdata = (conn, model_runtime, pipeline_version, rms_thresh)
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="ingest_service")
     client.user_data_set(userdata)

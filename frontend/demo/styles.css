@@ -91,6 +91,24 @@ code {
   border: 1px solid #2a3f5c;
 }
 
+.train-config label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 0.45rem;
+}
+
+#train-target-windows {
+  width: 220px;
+  max-width: 100%;
+  border-radius: var(--radius);
+  border: 1px solid #304258;
+  background: #111820;
+  color: var(--text);
+  padding: 0.72rem 0.9rem;
+  font-size: 0.95rem;
+}
+
 .panel {
   background: var(--card);
   border-radius: var(--radius);
@@ -101,6 +119,108 @@ code {
 
 #status-line {
   font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.mode-card,
+.progress-head,
+.progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.mode-card {
+  margin-bottom: 1rem;
+  padding: 0.9rem 1rem;
+  border-radius: 14px;
+  background: #151d26;
+  border: 1px solid #243041;
+}
+
+.mode-label {
+  margin-bottom: 0.2rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.mode-card strong {
+  font-size: 1.25rem;
+}
+
+.mode-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.45rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.pill {
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  background: #202c3b;
+  border: 1px solid #304258;
+  color: #d5e1ec;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.pill--online {
+  background: rgba(61, 220, 132, 0.16);
+  border-color: rgba(61, 220, 132, 0.55);
+  color: #7ef0ae;
+}
+
+.pill--offline {
+  background: #2a3038;
+  border-color: #414c59;
+  color: #c4ccd6;
+}
+
+#device-last-seen {
+  font-size: 0.76rem;
+}
+
+.progress-card {
+  margin: 0 0 1rem;
+  padding: 0.9rem 1rem 1rem;
+  border-radius: 14px;
+  background: #151d26;
+  border: 1px solid #243041;
+}
+
+.progress-head {
+  margin-bottom: 0.7rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.progress-head strong {
+  color: var(--text);
+  font-size: 1.1rem;
+}
+
+.progress-track {
+  height: 16px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #0f1419;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.progress-fill {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #2bb86a 0%, #5b9cf5 100%);
+  transition: width 180ms ease;
+}
+
+.progress-meta {
+  margin-top: 0.45rem;
+  font-size: 0.76rem;
   color: var(--muted);
 }
 

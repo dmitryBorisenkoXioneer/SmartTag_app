@@ -3,33 +3,67 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>SmartTag — демо вибрации</title>
+    <title>SmartTag — live мониторинг</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <main class="shell">
       <header class="head">
-        <h1>SmartTag demo</h1>
+        <h1>SmartTag live</h1>
         <p class="sub">
-          Кнопки шлют синтетику в MQTT как <code>simulate_mcu</code>. Нужны Docker, <strong>ingest_service</strong> и для IF —
-          обученный <code>MODEL_PATH</code> на ingest. <strong>Отклонение %</strong> — шкала по RMS (см. <code>RMS_DEV_*</code> в
-          <code>.env</code>) плюс нижняя планка при выбросе IF.
+          Экран показывает реальные окна и вывод модели для одного устройства ESP32. Во время обучения система копит только
+          последний сеанс нормы, затем автоматически или вручную запускает обучение модели и возвращается в режим
+          детектирования.
         </p>
       </header>
 
       <section class="row">
-        <button type="button" id="btn-assembled" class="btn btn-ok">С подшипником (норма)</button>
-        <button type="button" id="btn-no-bearing" class="btn btn-warn">Без подшипника</button>
-        <button type="button" id="btn-train" class="btn btn-ghost">Обучить IF</button>
+        <button type="button" id="btn-train-start" class="btn btn-ok">Включить обучение</button>
+        <button type="button" id="btn-train-stop" class="btn btn-warn">Выключить обучение</button>
+      </section>
+
+      <section class="panel train-config">
+        <label for="train-target-windows">Размер тренировочного набора (окон)</label>
+        <div class="row">
+          <input id="train-target-windows" type="number" min="10" step="1" />
+          <button type="button" id="btn-train-target-save" class="btn btn-ghost">Применить</button>
+        </div>
       </section>
 
       <section class="panel" id="status-line">Проверка API…</section>
 
       <section class="panel results" id="results" hidden>
-        <h2>Результат прогона</h2>
+        <h2>Текущий режим</h2>
+        <div class="mode-card">
+          <div>
+            <div class="mode-label">Состояние</div>
+            <strong id="mode-value">—</strong>
+          </div>
+          <div class="mode-meta">
+            <span class="pill" id="device-online-pill">—</span>
+            <span class="pill" id="mode-pill">—</span>
+            <span id="device-value">—</span>
+            <span id="device-last-seen">—</span>
+          </div>
+        </div>
+
+        <div class="progress-card" id="train-progress-card">
+          <div class="progress-head">
+            <span>Прогресс обучения</span>
+            <strong id="train-progress-value">—</strong>
+          </div>
+          <div class="progress-track" aria-hidden="true">
+            <div class="progress-fill" id="train-progress-fill"></div>
+          </div>
+          <div class="progress-meta">
+            <span id="train-progress-count">—</span>
+            <span id="train-progress-reason">—</span>
+          </div>
+        </div>
+
         <div class="deviation-meter" id="deviation-meter" hidden>
           <div class="deviation-meter__head">
-            <span>Отклонение (среднее), %</span>
+            <span>Отклонение, %</span>
             <strong id="deviation-meter-value">—</strong>
           </div>
           <div class="deviation-meter__track" aria-hidden="true">
@@ -43,22 +77,18 @@
           </div>
         </div>
         <dl class="grid">
-          <dt>Сценарий</dt>
+          <dt>Сценарий последнего окна</dt>
           <dd id="r-scenario">—</dd>
-          <dt>Окон в БД (за прогон)</dt>
-          <dd id="r-n">—</dd>
-          <dt>Отклонение (среднее), %</dt>
-          <dd id="r-dev-avg" class="pct">—</dd>
-          <dt>Отклонение (макс), %</dt>
-          <dd id="r-dev-max" class="pct">—</dd>
-          <dt>Средний RMS, mg</dt>
+          <dt>Начало последнего окна</dt>
+          <dd id="r-window-start">—</dd>
+          <dt>Текущий RMS, mg</dt>
           <dd id="r-rms">—</dd>
-          <dt>Средний score IF</dt>
+          <dt>Текущий score IF</dt>
           <dd id="r-score">—</dd>
-          <dt>Окон IF = выброс</dt>
+          <dt>IF = выброс</dt>
           <dd id="r-out">—</dd>
-          <dt>Макс RMS, mg</dt>
-          <dd id="r-max">—</dd>
+          <dt>Отклонение</dt>
+          <dd id="r-dev-avg" class="pct">—</dd>
         </dl>
         <p class="note" id="r-hint"></p>
       </section>

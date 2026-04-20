@@ -1,49 +1,54 @@
-const apiBase = ""; // same origin as demo_server
+const apiBase = "";
+let pollTimer = null;
+
+async function requestJson(url, options) {
+  const r = await fetch(url, options);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || `${r.status}`);
+  return data;
+}
 
 async function health() {
-  const r = await fetch(`${apiBase}/api/health`);
-  if (!r.ok) throw new Error(`health ${r.status}`);
-  return r.json();
+  return requestJson(`${apiBase}/api/health`);
 }
 
-function setBusy(busy) {
-  for (const id of ["btn-assembled", "btn-no-bearing", "btn-train"]) {
-    document.getElementById(id).disabled = busy;
-  }
+async function liveStatus() {
+  return requestJson(`${apiBase}/api/live/status`);
 }
 
-/** 0..100 from RMS (mg); same bounds as backend RMS_DEV_LOW / RMS_DEV_HIGH. */
-function pctFromRmsMg(rms, low, high) {
-  if (rms == null || low == null || high == null) return null;
-  const span = Math.max(Number(high) - Number(low), 1e-9);
-  return Math.min(100, Math.max(0, (100 * (Number(rms) - Number(low))) / span));
+function setButtons(status) {
+  const start = document.getElementById("btn-train-start");
+  const stop = document.getElementById("btn-train-stop");
+  const saveTarget = document.getElementById("btn-train-target-save");
+  const targetInput = document.getElementById("train-target-windows");
+  const mode = status?.mode;
+  const training = status?.training || {};
+  const isOnline = Boolean(status?.device_status?.online);
+  start.disabled = !isOnline || training.in_progress || training.enabled;
+  stop.disabled = training.in_progress || !training.enabled;
+  saveTarget.disabled = training.in_progress || training.enabled;
+  targetInput.disabled = training.in_progress || training.enabled;
+  if (mode === "training") stop.disabled = true;
 }
 
-/**
- * Prefer API stats.avg_deviation_pct / max (exact per-window SQL).
- * Fallback: older demo_server without those fields — approximate from aggregates + IF share.
- */
-function deviationDisplay(st, sc) {
-  const n = Number(st.n_windows);
-  if (!n) return { avg: null, max: null, approx: false };
-  const low = sc.rms_low_mg ?? 5;
-  const high = sc.rms_high_mg ?? 85;
-  const fl = sc.if_outlier_floor_pct ?? 90;
-  if (st.avg_deviation_pct != null && st.max_deviation_pct != null) {
-    return { avg: st.avg_deviation_pct, max: st.max_deviation_pct, approx: false };
-  }
-  if (st.avg_rms_mag == null || st.max_rms_mag == null) return { avg: null, max: null, approx: false };
-  const avgLin = pctFromRmsMg(st.avg_rms_mag, low, high);
-  const maxLin = pctFromRmsMg(st.max_rms_mag, low, high);
-  const no = Number(st.n_if_outliers) || 0;
-  const devOut = Math.min(100, Math.max(avgLin ?? 0, fl));
-  const avgB = no ? ((n - no) * (avgLin ?? 0) + no * devOut) / n : avgLin;
-  const maxB = no ? Math.max(maxLin ?? 0, fl) : maxLin;
-  return {
-    avg: avgB != null ? Math.round(avgB * 10) / 10 : null,
-    max: maxB != null ? Math.round(maxB * 10) / 10 : null,
-    approx: true,
-  };
+function modeLabel(mode) {
+  if (mode === "detecting") return "Детектирование";
+  if (mode === "training") return "Обучение модели";
+  return "Нет обученной модели";
+}
+
+function formatPrettyDateTime(value) {
+  if (!value) return "—";
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return value;
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(dt);
 }
 
 function setDeviationMeter(avg) {
@@ -65,89 +70,127 @@ function setDeviationMeter(avg) {
   thumb.style.left = `${pct}%`;
 }
 
-function showResults(data) {
-  const st = data.stats || {};
-  const sc = data.deviation_scale || {};
-  const dev = deviationDisplay(st, sc);
-  document.getElementById("r-scenario").textContent = data.scenario_id || data.scenario || "—";
-  document.getElementById("r-n").textContent = st.n_windows ?? "—";
-  document.getElementById("r-dev-avg").textContent = dev.avg == null ? "—" : `${dev.avg} %`;
-  document.getElementById("r-dev-max").textContent = dev.max == null ? "—" : `${dev.max} %`;
-  document.getElementById("r-rms").textContent = st.avg_rms_mag ?? "—";
-  document.getElementById("r-score").textContent =
-    st.avg_anomaly_score == null || st.n_windows === 0 ? "—" : String(st.avg_anomaly_score);
+function renderStatus(data, healthData) {
+  const tr = data.training || {};
+  const latest = data.latest_window || {};
+  const deviceStatus = data.device_status || {};
+  const scale = data.deviation_scale || healthData?.deviation_scale || {};
+
+  document.getElementById("status-line").textContent =
+    `Postgres: ${healthData?.postgres ? "ok" : "нет"} · ${data.transition_reason || "—"}`;
+  document.getElementById("mode-value").textContent = modeLabel(data.mode);
+  document.getElementById("mode-pill").textContent = tr.enabled
+    ? "Сбор данных"
+    : tr.in_progress
+      ? "Идёт fit"
+      : data.mode === "detecting"
+        ? "Модель активна"
+        : "Нет модели";
+  const onlinePill = document.getElementById("device-online-pill");
+  onlinePill.textContent = deviceStatus.label || "Оффлайн";
+  onlinePill.classList.toggle("pill--online", Boolean(deviceStatus.online));
+  onlinePill.classList.toggle("pill--offline", !deviceStatus.online);
+  document.getElementById("device-value").textContent = data.device_id || "—";
+  document.getElementById("device-last-seen").textContent =
+    deviceStatus.last_seen_ago_sec == null
+      ? "Данных ещё нет"
+      : `Последний пакет ${deviceStatus.last_seen_ago_sec} с назад`;
+
+  const progress = tr.progress_pct == null ? 0 : Number(tr.progress_pct);
+  const progressCard = document.getElementById("train-progress-card");
+  const showProgress = Boolean(tr.enabled || tr.in_progress || data.mode === "training");
+  progressCard.hidden = !showProgress;
+  document.getElementById("train-progress-fill").style.width = `${Math.max(0, Math.min(100, progress))}%`;
+  document.getElementById("train-progress-value").textContent =
+    tr.progress_pct == null ? "—" : `${Number(tr.progress_pct).toFixed(1)} %`;
+  document.getElementById("train-progress-count").textContent =
+    tr.target_windows != null ? `${tr.windows_collected || 0} / ${tr.target_windows} окон` : "—";
+  document.getElementById("train-progress-reason").textContent =
+    data.transition_reason || "—";
+  const targetInput = document.getElementById("train-target-windows");
+  if (document.activeElement !== targetInput && tr.target_windows != null) {
+    targetInput.value = String(tr.target_windows);
+  }
+
+  document.getElementById("r-scenario").textContent = latest.scenario_id || "—";
+  document.getElementById("r-window-start").textContent = formatPrettyDateTime(latest.window_start);
+  document.getElementById("r-rms").textContent = latest.rms_mag ?? "—";
+  document.getElementById("r-score").textContent = latest.anomaly_score ?? "—";
   document.getElementById("r-out").textContent =
-    st.n_if_outliers == null ? "—" : `${st.n_if_outliers} / ${st.n_windows || 0}`;
-  document.getElementById("r-max").textContent = st.max_rms_mag ?? "—";
-  setDeviationMeter(dev.avg);
-  const scaleHint =
-    sc.rms_low_mg != null
-      ? ` Шкала: ${sc.rms_low_mg}–${sc.rms_high_mg} mg → 0–100%, IF ≥ ${sc.if_outlier_floor_pct}%.`
-      : "";
-  const approxHint = dev.approx
-    ? " Проценты отклонения оценены в браузере (в ответе API нет avg_deviation_pct). Перезапустите uvicorn с актуальным demo_server.py — тогда значения считаются в SQL по каждому окну."
-    : "";
-  document.getElementById("r-hint").textContent = (data.hint || "") + scaleHint + approxHint;
+    latest.if_outlier == null ? "—" : latest.if_outlier ? "Да" : "Нет";
+  document.getElementById("r-dev-avg").textContent =
+    latest.deviation_pct == null ? "—" : `${latest.deviation_pct} %`;
+
+  const hint = [
+    scale.rms_low_mg != null
+      ? `Шкала отклонения: RMS ${scale.rms_low_mg}–${scale.rms_high_mg} mg, IF floor ${scale.if_outlier_floor_pct}%.`
+      : "",
+    latest.status_label ? `Последнее решение: ${latest.status_label}.` : "Ждём первое окно от ESP32.",
+    data.last_training_result?.stderr ? `Последняя ошибка обучения: ${data.last_training_result.stderr}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  document.getElementById("r-hint").textContent = hint || "—";
+
+  setDeviationMeter(latest.deviation_pct);
   document.getElementById("raw").textContent = JSON.stringify(data, null, 2);
   document.getElementById("results").hidden = false;
   document.getElementById("log").hidden = false;
+  setButtons(data);
 }
 
-async function runScenario(scenario) {
-  const status = document.getElementById("status-line");
-  setBusy(true);
-  status.textContent = "Публикация в MQTT…";
+async function refresh() {
   try {
-    const r = await fetch(`${apiBase}/api/demo/run`, {
+    const [h, status] = await Promise.all([health(), liveStatus()]);
+    renderStatus(status, h);
+  } catch (e) {
+    document.getElementById("status-line").textContent =
+      `Ошибка API: ${e.message || e}. Запустите uvicorn demo_server:app --host 127.0.0.1 --port 8787`;
+  }
+}
+
+async function startTraining() {
+  try {
+    await requestJson(`${apiBase}/api/live/training/start`, { method: "POST" });
+    await refresh();
+  } catch (e) {
+    document.getElementById("status-line").textContent = `Ошибка запуска обучения: ${e.message || e}`;
+  }
+}
+
+async function stopTraining() {
+  try {
+    await requestJson(`${apiBase}/api/live/training/stop`, { method: "POST" });
+    await refresh();
+  } catch (e) {
+    document.getElementById("status-line").textContent = `Ошибка остановки обучения: ${e.message || e}`;
+  }
+}
+
+async function saveTrainingTarget() {
+  const input = document.getElementById("train-target-windows");
+  const value = Number(input.value);
+  if (!Number.isInteger(value) || value < 10) {
+    document.getElementById("status-line").textContent = "Количество окон должно быть целым числом >= 10";
+    return;
+  }
+  try {
+    await requestJson(`${apiBase}/api/live/training/config`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scenario, duration_sec: 8, publish_hz: 20 }),
+      body: JSON.stringify({ target_windows: value }),
     });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || r.statusText);
-    status.textContent = "Готово.";
-    showResults(data);
+    await refresh();
   } catch (e) {
-    status.textContent = `Ошибка: ${e.message || e}`;
-  } finally {
-    setBusy(false);
+    document.getElementById("status-line").textContent = `Ошибка сохранения параметра: ${e.message || e}`;
   }
 }
 
-async function runTrain() {
-  const status = document.getElementById("status-line");
-  setBusy(true);
-  status.textContent = "Запуск train_if.py…";
-  try {
-    const r = await fetch(`${apiBase}/api/demo/train`, { method: "POST" });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || r.statusText);
-    status.textContent = data.ok ? "Обучение завершилось." : "Обучение завершилось с ошибкой (см. сырой ответ).";
-    document.getElementById("raw").textContent = JSON.stringify(data, null, 2);
-    document.getElementById("log").hidden = false;
-  } catch (e) {
-    status.textContent = `Ошибка: ${e.message || e}`;
-  } finally {
-    setBusy(false);
-  }
-}
-
-document.getElementById("btn-assembled").addEventListener("click", () => runScenario("assembled"));
-document.getElementById("btn-no-bearing").addEventListener("click", () => runScenario("no_bearing"));
-document.getElementById("btn-train").addEventListener("click", () => runTrain());
+document.getElementById("btn-train-start").addEventListener("click", startTraining);
+document.getElementById("btn-train-stop").addEventListener("click", stopTraining);
+document.getElementById("btn-train-target-save").addEventListener("click", saveTrainingTarget);
 
 (async () => {
-  const el = document.getElementById("status-line");
-  try {
-    const h = await health();
-    const bits = [`Postgres: ${h.postgres ? "ok" : "нет"}`, `MODEL_PATH (на сервере UI): ${h.model_path_set ? "задан" : "нет"}`];
-    const ds = h.deviation_scale;
-    const scale =
-      ds && ds.rms_low_mg != null
-        ? ` Шкала отклонения: RMS ${ds.rms_low_mg}–${ds.rms_high_mg} mg → 0–100%, IF ≥ ${ds.if_outlier_floor_pct}%.`
-        : "";
-    el.textContent = `${bits.join(" · ")}. Запустите ingest с MODEL_PATH для IF в БД.${scale}`;
-  } catch {
-    el.textContent = "Нет связи с API. Запустите: uvicorn demo_server:app --host 127.0.0.1 --port 8787 из каталога backend.";
-  }
+  await refresh();
+  pollTimer = window.setInterval(refresh, 1500);
 })();

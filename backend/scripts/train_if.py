@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import joblib
@@ -33,26 +34,39 @@ def pg_conninfo() -> str:
     )
 
 
+def _session_start_env() -> datetime | None:
+    raw = os.environ.get("TRAIN_SESSION_START", "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise SystemExit(f"invalid TRAIN_SESSION_START: {raw}") from exc
+
+
 def main() -> None:
     device_id = os.environ.get("TRAIN_DEVICE_ID", "demo001")
     pipeline_version = os.environ.get("PIPELINE_VERSION", "v0")
+    min_windows = int(os.environ.get("MIN_TRAIN_WINDOWS", "50"))
     out_path = Path(os.environ.get("MODEL_PATH", str(ROOT / "artifacts/model_v0.joblib")))
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    session_start = _session_start_env()
 
     sql = """
         SELECT rms_mag FROM feature_windows
         WHERE device_id = %s
           AND scenario_id = %s
           AND pipeline_version = %s
-        ORDER BY window_start
+          AND (%s::timestamptz IS NULL OR received_at >= %s::timestamptz)
+        ORDER BY received_at
     """
     with psycopg.connect(pg_conninfo()) as conn:
         with conn.cursor() as cur:
-            cur.execute(sql, (device_id, SCENARIO_ASSEMBLED, pipeline_version))
+            cur.execute(sql, (device_id, SCENARIO_ASSEMBLED, pipeline_version, session_start, session_start))
             rows = [float(r[0]) for r in cur.fetchall()]
 
-    if len(rows) < 50:
-        raise SystemExit(f"need at least ~50 windows, got {len(rows)} — run simulate_mcu + ingest longer")
+    if len(rows) < min_windows:
+        raise SystemExit(f"need at least ~{min_windows} windows, got {len(rows)}")
 
     X = np.array(rows, dtype=np.float64).reshape(-1, 1)
     clf = IsolationForest(
@@ -62,7 +76,7 @@ def main() -> None:
     )
     clf.fit(X)
     joblib.dump(clf, out_path)
-    print(f"wrote {out_path} trained on n={len(rows)} rows", flush=True)
+    print(f"wrote {out_path} trained on n={len(rows)} rows session_start={session_start}", flush=True)
 
 
 if __name__ == "__main__":
