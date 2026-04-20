@@ -61,41 +61,45 @@
           </div>
         </div>
 
-        <div class="deviation-meter" id="deviation-meter" hidden>
-          <div class="deviation-meter__head">
-            <span>Отклонение, %</span>
-            <strong id="deviation-meter-value">—</strong>
+        <div id="offline-sensitive-info">
+          <div class="deviation-meter" id="deviation-meter" hidden>
+            <div class="deviation-meter__head">
+              <span>Отклонение, %</span>
+              <strong id="deviation-meter-value">—</strong>
+            </div>
+            <div class="deviation-meter__track" aria-hidden="true">
+              <div class="deviation-meter__mask" id="deviation-meter-mask"></div>
+              <div class="deviation-meter__thumb" id="deviation-meter-thumb"></div>
+            </div>
+            <div class="deviation-meter__labels" aria-hidden="true">
+              <span>0%</span>
+              <span>50%</span>
+              <span>100%</span>
+            </div>
           </div>
-          <div class="deviation-meter__track" aria-hidden="true">
-            <div class="deviation-meter__mask" id="deviation-meter-mask"></div>
-            <div class="deviation-meter__thumb" id="deviation-meter-thumb"></div>
-          </div>
-          <div class="deviation-meter__labels" aria-hidden="true">
-            <span>0%</span>
-            <span>50%</span>
-            <span>100%</span>
-          </div>
+
+          <dl class="grid">
+            <dt>Сценарий последнего окна</dt>
+            <dd id="r-scenario">—</dd>
+            <dt>Начало последнего окна</dt>
+            <dd id="r-window-start">—</dd>
+            <dt>Текущий RMS, mg</dt>
+            <dd id="r-rms">—</dd>
+            <dt>Текущий score IF</dt>
+            <dd id="r-score">—</dd>
+            <dt>IF = выброс</dt>
+            <dd id="r-out">—</dd>
+            <dt>Отклонение</dt>
+            <dd id="r-dev-avg" class="pct">—</dd>
+          </dl>
+          <p class="note" id="r-hint"></p>
         </div>
-        <dl class="grid">
-          <dt>Сценарий последнего окна</dt>
-          <dd id="r-scenario">—</dd>
-          <dt>Начало последнего окна</dt>
-          <dd id="r-window-start">—</dd>
-          <dt>Текущий RMS, mg</dt>
-          <dd id="r-rms">—</dd>
-          <dt>Текущий score IF</dt>
-          <dd id="r-score">—</dd>
-          <dt>IF = выброс</dt>
-          <dd id="r-out">—</dd>
-          <dt>Отклонение</dt>
-          <dd id="r-dev-avg" class="pct">—</dd>
-        </dl>
-        <p class="note" id="r-hint"></p>
       </section>
 
       <section class="panel log" id="log" hidden>
-        <h2>Сырой ответ</h2>
-        <pre id="raw"></pre>
+        <h2>Журнал событий</h2>
+        <div id="event-log-empty" class="note">Ждём первые события…</div>
+        <ul id="event-log" class="event-log" hidden></ul>
       </section>
     </main>
     <script src="./app.js" type="module"></script>

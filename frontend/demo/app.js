@@ -1,5 +1,9 @@
 const apiBase = "";
 let pollTimer = null;
+let previousStatus = null;
+let apiErrorActive = false;
+const eventLog = [];
+const maxEventLogItems = 25;
 
 async function requestJson(url, options) {
   const r = await fetch(url, options);
@@ -51,6 +55,111 @@ function formatPrettyDateTime(value) {
   }).format(dt);
 }
 
+function pushEvent(type, message, at = new Date().toISOString()) {
+  eventLog.unshift({ type, message, at });
+  if (eventLog.length > maxEventLogItems) {
+    eventLog.length = maxEventLogItems;
+  }
+}
+
+function renderEventLog() {
+  const list = document.getElementById("event-log");
+  const empty = document.getElementById("event-log-empty");
+  if (!eventLog.length) {
+    list.hidden = true;
+    empty.hidden = false;
+    list.innerHTML = "";
+    return;
+  }
+
+  empty.hidden = true;
+  list.hidden = false;
+  list.innerHTML = eventLog
+    .map(
+      (entry) => `
+        <li class="event-log__item">
+          <div class="event-log__meta">
+            <span class="event-log__type">${entry.type}</span>
+            <span>${formatPrettyDateTime(entry.at)}</span>
+          </div>
+          <div class="event-log__message">${entry.message}</div>
+        </li>
+      `,
+    )
+    .join("");
+}
+
+function collectEvents(data) {
+  const tr = data.training || {};
+  const latest = data.latest_window || {};
+  const deviceStatus = data.device_status || {};
+
+  if (!previousStatus) {
+    pushEvent("Система", `Панель подключена. Текущий режим: ${modeLabel(data.mode)}.`);
+    if (deviceStatus.online) {
+      pushEvent("Устройство", "Устройство онлайн.");
+    }
+    previousStatus = {
+      mode: data.mode,
+      online: Boolean(deviceStatus.online),
+      trainingEnabled: Boolean(tr.enabled),
+      trainingInProgress: Boolean(tr.in_progress),
+      trainingFinishedAt: tr.finished_at || null,
+      targetWindows: tr.target_windows ?? null,
+      latestWindowAt: latest.received_at || null,
+    };
+    return;
+  }
+
+  const prev = previousStatus;
+  const online = Boolean(deviceStatus.online);
+  if (prev.online !== online) {
+    pushEvent("Устройство", online ? "Устройство снова онлайн." : "Устройство перешло в оффлайн.");
+  }
+
+  if (prev.mode !== data.mode) {
+    pushEvent("Режим", `Режим изменён: ${modeLabel(prev.mode)} -> ${modeLabel(data.mode)}.`);
+  }
+
+  if (!prev.trainingEnabled && tr.enabled) {
+    pushEvent("Обучение", `Сбор данных начат. Цель: ${tr.target_windows || "—"} окон.`);
+  } else if (prev.trainingEnabled && !tr.enabled && !tr.in_progress) {
+    pushEvent("Обучение", "Сбор данных остановлен.");
+  }
+
+  if (!prev.trainingInProgress && tr.in_progress) {
+    pushEvent("Обучение", "Запущено обучение модели.");
+  } else if (prev.trainingInProgress && !tr.in_progress) {
+    pushEvent("Обучение", data.last_training_result?.ok ? "Обучение модели завершено успешно." : "Обучение модели завершилось с ошибкой.");
+  }
+
+  if (prev.targetWindows !== tr.target_windows && tr.target_windows != null) {
+    pushEvent("Настройки", `Размер тренировочного набора изменён на ${tr.target_windows} окон.`);
+  }
+
+  if (
+    latest.received_at &&
+    latest.received_at !== prev.latestWindowAt &&
+    latest.if_outlier === true
+  ) {
+    pushEvent(
+      "Детект",
+      `Обнаружен выброс: RMS ${Number(latest.rms_mag).toFixed(3)} mg, score ${Number(latest.anomaly_score).toFixed(6)}.`,
+      latest.received_at,
+    );
+  }
+
+  previousStatus = {
+    mode: data.mode,
+    online,
+    trainingEnabled: Boolean(tr.enabled),
+    trainingInProgress: Boolean(tr.in_progress),
+    trainingFinishedAt: tr.finished_at || null,
+    targetWindows: tr.target_windows ?? null,
+    latestWindowAt: latest.received_at || null,
+  };
+}
+
 function setDeviationMeter(avg) {
   const meter = document.getElementById("deviation-meter");
   const value = document.getElementById("deviation-meter-value");
@@ -75,6 +184,7 @@ function renderStatus(data, healthData) {
   const latest = data.latest_window || {};
   const deviceStatus = data.device_status || {};
   const scale = data.deviation_scale || healthData?.deviation_scale || {};
+  const isOnline = Boolean(deviceStatus.online);
 
   document.getElementById("status-line").textContent =
     `Postgres: ${healthData?.postgres ? "ok" : "нет"} · ${data.transition_reason || "—"}`;
@@ -111,6 +221,7 @@ function renderStatus(data, healthData) {
   if (document.activeElement !== targetInput && tr.target_windows != null) {
     targetInput.value = String(tr.target_windows);
   }
+  document.getElementById("offline-sensitive-info").hidden = !isOnline;
 
   document.getElementById("r-scenario").textContent = latest.scenario_id || "—";
   document.getElementById("r-window-start").textContent = formatPrettyDateTime(latest.window_start);
@@ -122,8 +233,8 @@ function renderStatus(data, healthData) {
     latest.deviation_pct == null ? "—" : `${latest.deviation_pct} %`;
 
   const hint = [
-    scale.rms_low_mg != null
-      ? `Шкала отклонения: RMS ${scale.rms_low_mg}–${scale.rms_high_mg} mg, IF floor ${scale.if_outlier_floor_pct}%.`
+    scale.if_score_bad_threshold != null
+      ? `Шкала отклонения: 0% при положительном score, 100% при score <= -${scale.if_score_bad_threshold}.`
       : "",
     latest.status_label ? `Последнее решение: ${latest.status_label}.` : "Ждём первое окно от ESP32.",
     data.last_training_result?.stderr ? `Последняя ошибка обучения: ${data.last_training_result.stderr}` : "",
@@ -133,7 +244,8 @@ function renderStatus(data, healthData) {
   document.getElementById("r-hint").textContent = hint || "—";
 
   setDeviationMeter(latest.deviation_pct);
-  document.getElementById("raw").textContent = JSON.stringify(data, null, 2);
+  collectEvents(data);
+  renderEventLog();
   document.getElementById("results").hidden = false;
   document.getElementById("log").hidden = false;
   setButtons(data);
@@ -142,8 +254,18 @@ function renderStatus(data, healthData) {
 async function refresh() {
   try {
     const [h, status] = await Promise.all([health(), liveStatus()]);
+    if (apiErrorActive) {
+      pushEvent("API", "Связь с backend восстановлена.");
+      apiErrorActive = false;
+    }
     renderStatus(status, h);
   } catch (e) {
+    if (!apiErrorActive) {
+      pushEvent("API", `Ошибка связи с backend: ${e.message || e}.`);
+      apiErrorActive = true;
+      renderEventLog();
+      document.getElementById("log").hidden = false;
+    }
     document.getElementById("status-line").textContent =
       `Ошибка API: ${e.message || e}. Запустите uvicorn demo_server:app --host 127.0.0.1 --port 8787`;
   }

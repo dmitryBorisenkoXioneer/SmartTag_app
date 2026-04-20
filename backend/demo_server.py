@@ -31,7 +31,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 DEVICE_ID = os.environ.get("DEVICE_ID", "esp32dev001")
 PIPELINE_VERSION = os.environ.get("PIPELINE_VERSION", "v0")
-TARGET_WINDOWS = int(os.environ.get("MIN_TRAIN_WINDOWS", "50"))
+TARGET_WINDOWS = int(os.environ.get("MIN_TRAIN_WINDOWS", "1500"))
 MODEL_PATH = Path(os.environ.get("MODEL_PATH", str(ROOT / "artifacts/model_v0.joblib")))
 SCENARIO_ASSEMBLED = "stepper_5rps_assembled"
 DEVICE_ONLINE_WINDOW_S = float(os.environ.get("DEVICE_ONLINE_WINDOW_S", "5"))
@@ -78,24 +78,17 @@ _state = TrainingState(
     transition_reason="Детектирование активно." if MODEL_PATH.is_file() else "Нет обученной модели.",
 )
 
-def _deviation_env() -> tuple[float, float, float]:
-    low = float(os.environ.get("RMS_DEV_LOW", "5"))
-    high = float(os.environ.get("RMS_DEV_HIGH", "85"))
-    if high <= low:
-        high = low + 1e-3
-    floor = float(os.environ.get("IF_OUTLIER_PCT_FLOOR", "90"))
-    return low, high, min(100.0, max(0.0, floor))
+def _deviation_env() -> tuple[float]:
+    bad = float(os.environ.get("IF_SCORE_BAD_THRESHOLD", "0.15"))
+    return (max(bad, 1e-6),)
 
 
-def _deviation_pct(rms_mag: float | None, if_outlier: bool | None) -> float | None:
-    if rms_mag is None:
+def _deviation_pct(anomaly_score: float | None) -> float | None:
+    if anomaly_score is None:
         return None
-    low, high, if_floor = _deviation_env()
-    span = max(high - low, 1e-9)
-    pct = 100.0 * (float(rms_mag) - low) / span
+    bad_threshold = _deviation_env()[0]
+    pct = 100.0 * max(0.0, -float(anomaly_score)) / bad_threshold
     pct = min(100.0, max(0.0, pct))
-    if if_outlier:
-        pct = max(pct, if_floor)
     return round(pct, 1)
 
 
@@ -296,7 +289,7 @@ def _fetch_latest_window() -> dict | None:
         "rms_mag": round(float(rms_mag), 4),
         "if_outlier": bool(if_outlier) if if_outlier is not None else None,
         "anomaly_score": round(float(anomaly_score), 6) if anomaly_score is not None else None,
-        "deviation_pct": _deviation_pct(float(rms_mag), bool(if_outlier) if if_outlier is not None else None),
+        "deviation_pct": _deviation_pct(float(anomaly_score)) if anomaly_score is not None else None,
         "status_label": "Отклонение" if if_outlier else "Норма",
     }
 
@@ -452,9 +445,7 @@ def _live_status() -> dict:
         "latest_window": latest,
         "last_training_result": snapshot["last_result"],
         "deviation_scale": {
-            "rms_low_mg": _deviation_env()[0],
-            "rms_high_mg": _deviation_env()[1],
-            "if_outlier_floor_pct": _deviation_env()[2],
+            "if_score_bad_threshold": _deviation_env()[0],
         },
     }
 
@@ -471,7 +462,7 @@ def health() -> dict:
     except Exception as e:  # noqa: BLE001
         log.warning("pg health: %s", e)
         pg_ok = False
-    low, high, fl = _deviation_env()
+    bad = _deviation_env()[0]
     return {
         "postgres": pg_ok,
         "device_id": DEVICE_ID,
@@ -481,7 +472,7 @@ def health() -> dict:
         "target_windows": TARGET_WINDOWS,
         "device_online_window_sec": DEVICE_ONLINE_WINDOW_S,
         "ingest": _ingest_status(),
-        "deviation_scale": {"rms_low_mg": low, "rms_high_mg": high, "if_outlier_floor_pct": fl},
+        "deviation_scale": {"if_score_bad_threshold": bad},
     }
 
 

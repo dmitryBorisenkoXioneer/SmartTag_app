@@ -71,7 +71,7 @@ def main() -> None:
     X = np.array(rows, dtype=np.float64).reshape(-1, 1)
     clf = IsolationForest(
         n_estimators=200,
-        contamination=0.05,
+        contamination=0.01,
         random_state=42,
     )
     clf.fit(X)
