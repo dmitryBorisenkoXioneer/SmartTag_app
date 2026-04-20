@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -49,6 +50,7 @@ class TrainingResult:
     session_start: str | None = None
     stop_reason: str | None = None
     finished_at: str | None = None
+    quality: dict | None = None
 
 
 @dataclass
@@ -327,6 +329,54 @@ def _device_status(latest: dict | None) -> dict:
     }
 
 
+def _parse_training_quality(stdout: str) -> dict | None:
+    if not stdout:
+        return None
+    line = None
+    for candidate in stdout.splitlines():
+        if "quality_score=" in candidate:
+            line = candidate
+    if line is None:
+        return None
+
+    def token(name: str) -> str | None:
+        match = re.search(rf"\b{name}=([^\s]+)", line)
+        return match.group(1) if match else None
+
+    raw_rows_s = token("raw_rows")
+    clean_rows_s = token("clean_rows")
+    dirty_ratio_s = token("dirty_ratio")
+    dtus_ok_ratio_s = token("dtus_ok_ratio")
+    quality_score_s = token("quality_score")
+    quality_label_s = token("quality_label")
+    if raw_rows_s is None or clean_rows_s is None or dirty_ratio_s is None or quality_score_s is None:
+        return None
+    try:
+        raw_rows = int(raw_rows_s)
+        clean_rows = int(clean_rows_s)
+        dirty_ratio = float(dirty_ratio_s)
+        quality_score = float(quality_score_s)
+    except ValueError:
+        return None
+
+    dtus_ok_ratio = None
+    if dtus_ok_ratio_s is not None and dtus_ok_ratio_s.lower() != "na":
+        try:
+            dtus_ok_ratio = float(dtus_ok_ratio_s)
+        except ValueError:
+            dtus_ok_ratio = None
+
+    quality_label = quality_label_s or ("good" if quality_score >= 85 else "degraded" if quality_score >= 70 else "poor")
+    return {
+        "raw_rows": raw_rows,
+        "clean_rows": clean_rows,
+        "dirty_ratio": round(dirty_ratio, 4),
+        "dtus_ok_ratio": dtus_ok_ratio,
+        "quality_score": round(quality_score, 1),
+        "quality_label": quality_label,
+    }
+
+
 def _run_training_job(job_id: int, session_start: datetime, stop_reason: str) -> None:
     env = os.environ.copy()
     env["TRAIN_DEVICE_ID"] = DEVICE_ID
@@ -343,14 +393,16 @@ def _run_training_job(job_id: int, session_start: datetime, stop_reason: str) ->
             env=env,
         )
         ok = proc.returncode == 0
+        stdout = (proc.stdout or "")[-4000:]
         result = TrainingResult(
             ok=ok,
             returncode=proc.returncode,
-            stdout=(proc.stdout or "")[-4000:],
+            stdout=stdout,
             stderr=(proc.stderr or "")[-4000:],
             session_start=session_start.isoformat(),
             stop_reason=stop_reason,
             finished_at=datetime.now(timezone.utc).isoformat(),
+            quality=_parse_training_quality(stdout),
         )
     except subprocess.TimeoutExpired:
         result = TrainingResult(

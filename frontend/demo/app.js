@@ -41,6 +41,14 @@ function modeLabel(mode) {
   return "Нет обученной модели";
 }
 
+function qualityLabel(score) {
+  if (score == null || Number.isNaN(Number(score))) return "—";
+  const s = Number(score);
+  if (s >= 85) return "good";
+  if (s >= 70) return "degraded";
+  return "poor";
+}
+
 function formatPrettyDateTime(value) {
   if (!value) return "—";
   const dt = new Date(value);
@@ -217,6 +225,14 @@ function renderStatus(data, healthData) {
     tr.target_windows != null ? `${tr.windows_collected || 0} / ${tr.target_windows} окон` : "—";
   document.getElementById("train-progress-reason").textContent =
     data.transition_reason || "—";
+  const quality = data.last_training_result?.quality || null;
+  const qualityScore = quality?.quality_score;
+  const qLabel = quality?.quality_label || qualityLabel(qualityScore);
+  const qualityLine = document.getElementById("train-quality-line");
+  qualityLine.innerHTML =
+    qualityScore == null
+      ? "Качество обучения: —"
+      : `Качество обучения: <strong>${Number(qualityScore).toFixed(1)}%</strong> (${qLabel})`;
   const targetInput = document.getElementById("train-target-windows");
   if (document.activeElement !== targetInput && tr.target_windows != null) {
     targetInput.value = String(tr.target_windows);

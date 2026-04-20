@@ -71,6 +71,14 @@ def _split_train_holdout(x: np.ndarray, holdout_ratio: float) -> tuple[np.ndarra
     return x[:train_n], x[train_n:]
 
 
+def _quality_label(score: float) -> str:
+    if score >= 85.0:
+        return "good"
+    if score >= 70.0:
+        return "degraded"
+    return "poor"
+
+
 def main() -> None:
     device_id = os.environ.get("TRAIN_DEVICE_ID", "demo001")
     pipeline_version = os.environ.get("PIPELINE_VERSION", "v0")
@@ -146,6 +154,12 @@ def main() -> None:
                 f"critical: not enough windows after filter/raw fallback, filtered={X.shape[0]} raw={X_raw.shape[0]}"
             )
 
+    raw_rows = int(X_raw.shape[0])
+    clean_rows = int(X.shape[0])
+    dirty_ratio = max(0.0, min(1.0, float(dropped) / max(1, raw_rows)))
+    quality_score = round(100.0 * (1.0 - dirty_ratio), 1)
+    quality_label = _quality_label(quality_score)
+
     x_train, x_holdout = _split_train_holdout(X, holdout_ratio=holdout_ratio)
     if x_train.shape[0] < 2 or x_holdout.shape[0] < 1:
         raise SystemExit("not enough windows for train/holdout split")
@@ -172,7 +186,9 @@ def main() -> None:
         "wrote "
         f"{out_path} trained_on={x_train.shape[0]} holdout={x_holdout.shape[0]} "
         f"holdout_outlier_rate={holdout_outlier_rate:.4f} "
-        f"raw_rows={X_raw.shape[0]} dropped={dropped} session_start={session_start}",
+        f"raw_rows={raw_rows} clean_rows={clean_rows} dropped={dropped} "
+        f"dirty_ratio={dirty_ratio:.4f} dtus_ok_ratio=na quality_score={quality_score:.1f} "
+        f"quality_label={quality_label} session_start={session_start}",
         flush=True,
     )
 

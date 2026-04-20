@@ -224,6 +224,16 @@ code {
   color: var(--muted);
 }
 
+.progress-quality {
+  margin-top: 0.45rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.progress-quality strong {
+  color: var(--text);
+}
+
 .results h2,
 .log h2 {
   margin: 0 0 0.75rem;
