@@ -27,7 +27,7 @@ if str(ROOT) not in sys.path:
 
 from smarttag_ml.binary_telemetry_v1 import decode_binary_telemetry_v1  # noqa: E402
 from smarttag_ml.constants import WINDOW_SAMPLES  # noqa: E402
-from smarttag_ml.windowing import rms_mag_from_xyz  # noqa: E402
+from smarttag_ml.windowing import window_features_from_xyz  # noqa: E402
 
 load_dotenv(ROOT / ".env")
 
@@ -43,6 +43,19 @@ def pg_conninfo() -> str:
         f"user={os.environ.get('POSTGRES_USER', 'smarttag')} "
         f"password={os.environ.get('POSTGRES_PASSWORD', '')}"
     )
+
+
+def ensure_feature_columns(conn: psycopg.Connection) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            ALTER TABLE feature_windows
+            ADD COLUMN IF NOT EXISTS std_mag DOUBLE PRECISION,
+            ADD COLUMN IF NOT EXISTS peak_to_peak_mag DOUBLE PRECISION,
+            ADD COLUMN IF NOT EXISTS crest_factor DOUBLE PRECISION
+            """
+        )
+    conn.commit()
 
 
 @dataclass
@@ -120,14 +133,22 @@ class DeviceBuffer:
             chunk = self.samples[:WINDOW_SAMPLES]
             self.samples = self.samples[WINDOW_SAMPLES:]
             arr = np.array([[c[0], c[1], c[2]] for c in chunk], dtype=np.float64)
-            rms = rms_mag_from_xyz(arr)
+            feat = window_features_from_xyz(arr)
+            rms = feat["rms_mag"]
             ws_dt = datetime.now(timezone.utc)
 
             model = model_runtime.refresh()
             if_outlier = None
             anomaly_score = None
             if model is not None:
-                xrow = np.array([[rms]], dtype=np.float64)
+                n_features = int(getattr(model, "n_features_in_", 1))
+                if n_features == 1:
+                    xrow = np.array([[feat["rms_mag"]]], dtype=np.float64)
+                else:
+                    xrow = np.array(
+                        [[feat["rms_mag"], feat["std_mag"], feat["peak_to_peak_mag"], feat["crest_factor"]]],
+                        dtype=np.float64,
+                    )
                 pred = int(model.predict(xrow)[0])
                 if_outlier = pred == -1
                 anomaly_score = float(model.decision_function(xrow)[0])
@@ -141,11 +162,14 @@ class DeviceBuffer:
                 cur.execute(
                     """
                     INSERT INTO feature_windows (
-                      device_id, scenario_id, window_start, rms_mag,
+                      device_id, scenario_id, window_start, rms_mag, std_mag, peak_to_peak_mag, crest_factor,
                       pipeline_version, if_outlier, anomaly_score
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (device_id, window_start) DO UPDATE SET
                       rms_mag = EXCLUDED.rms_mag,
+                      std_mag = EXCLUDED.std_mag,
+                      peak_to_peak_mag = EXCLUDED.peak_to_peak_mag,
+                      crest_factor = EXCLUDED.crest_factor,
                       scenario_id = EXCLUDED.scenario_id,
                       if_outlier = EXCLUDED.if_outlier,
                       anomaly_score = EXCLUDED.anomaly_score,
@@ -155,7 +179,10 @@ class DeviceBuffer:
                         device_id,
                         scenario_id,
                         ws_dt,
-                        rms,
+                        feat["rms_mag"],
+                        feat["std_mag"],
+                        feat["peak_to_peak_mag"],
+                        feat["crest_factor"],
                         pipeline_version,
                         if_outlier,
                         anomaly_score,
@@ -234,6 +261,7 @@ def main() -> None:
             log.info("MODEL_PATH missing/untrained — writing rows with if_outlier=NULL")
 
     conn = psycopg.connect(pg_conninfo())
+    ensure_feature_columns(conn)
     userdata = (conn, model_runtime, pipeline_version, rms_thresh)
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="ingest_service")

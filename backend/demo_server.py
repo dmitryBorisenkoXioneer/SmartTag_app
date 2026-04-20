@@ -370,11 +370,18 @@ def _run_training_job(job_id: int, session_start: datetime, stop_reason: str) ->
         _state.training_in_progress = False
         _state.training_finished_at = datetime.now(timezone.utc)
         _state.last_result = result
-        _state.model_state = "detecting" if result.ok else "untrained"
         if result.ok:
+            _state.model_state = "detecting"
             _state.transition_reason = "Обучение завершено. Детектирование активно."
         else:
-            _state.transition_reason = "Обучение завершилось с ошибкой. Модель не обучена."
+            if MODEL_PATH.is_file():
+                _state.model_state = "detecting"
+                _state.transition_reason = (
+                    "Обучение завершилось с ошибкой, сохранена предыдущая рабочая модель."
+                )
+            else:
+                _state.model_state = "untrained"
+                _state.transition_reason = "Обучение завершилось с ошибкой. Модель не обучена."
     log.info("training job finished ok=%s reason=%s", result.ok, stop_reason)
 
 
@@ -483,6 +490,8 @@ def live_status() -> dict:
 
 @app.post("/api/live/training/start")
 def live_training_start() -> dict:
+    if not _device_status(_fetch_latest_window()).get("online", False):
+        raise HTTPException(status_code=409, detail="critical: device offline")
     with _state_lock:
         if _state.training_in_progress:
             raise HTTPException(status_code=409, detail="training job already running")
@@ -491,15 +500,16 @@ def live_training_start() -> dict:
         _state.training_started_at = datetime.now(timezone.utc)
         _state.training_finished_at = None
         _state.last_result = None
-        _state.model_state = "untrained"
+        _state.model_state = "detecting" if MODEL_PATH.is_file() else "untrained"
         _state.transition_reason = "Сбор данных для обучения..."
         _state.active_job_id += 1
-    _delete_model_file()
     return _live_status()
 
 
 @app.post("/api/live/training/stop")
 def live_training_stop() -> dict:
+    if not _device_status(_fetch_latest_window()).get("online", False):
+        raise HTTPException(status_code=409, detail="critical: device offline")
     with _state_lock:
         if _state.training_in_progress:
             raise HTTPException(status_code=409, detail="training job already running")
